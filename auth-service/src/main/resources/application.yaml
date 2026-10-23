@@ -10,8 +10,8 @@ spring:
     url: "${AUTH_DB_JDBC_URL:jdbc:postgresql://localhost:5432/task_flow}"
     user: "${AUTH_DB_USERNAME:task_flow}"
     password: "${AUTH_DB_PASSWORD:task_flow}"
-    default-schema: auth_service
-    liquibase-schema: auth_service
+    default-schema: public
+    liquibase-schema: public
     database-change-log-table: auth_database_changelog
     database-change-log-lock-table: auth_database_changelog_lock
 
