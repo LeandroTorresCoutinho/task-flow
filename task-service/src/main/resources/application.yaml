@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: task-service
+  r2dbc:
+    url: "${TASK_DB_R2DBC_URL:r2dbc:postgresql://localhost:5432/task_flow?schema=task_service}"
+    username: "${TASK_DB_USERNAME:task_flow}"
+    password: "${TASK_DB_PASSWORD:task_flow}"
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+    url: "${TASK_DB_JDBC_URL:jdbc:postgresql://localhost:5432/task_flow}"
+    user: "${TASK_DB_USERNAME:task_flow}"
+    password: "${TASK_DB_PASSWORD:task_flow}"
+    default-schema: task_service
+    liquibase-schema: task_service
+
+server:
+  port: "${TASK_SERVICE_PORT:8082}"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
