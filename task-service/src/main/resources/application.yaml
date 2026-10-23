@@ -12,6 +12,8 @@ spring:
     password: "${TASK_DB_PASSWORD:task_flow}"
     default-schema: task_service
     liquibase-schema: task_service
+    database-change-log-table: task_database_changelog
+    database-change-log-lock-table: task_database_changelog_lock
 
 server:
   port: "${TASK_SERVICE_PORT:8082}"

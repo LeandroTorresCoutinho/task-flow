@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - changeSet:
+      id: task-001-create-schema
+      author: task-flow
+      changes:
+        - sql:
+            sql: CREATE SCHEMA IF NOT EXISTS task_service
