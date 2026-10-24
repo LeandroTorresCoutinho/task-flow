@@ -147,6 +147,7 @@ class ApiIntegrationEnvironmentIT {
                 .start();
     }
 
+    @SuppressWarnings("BusyWait")
     private static void waitUntilHealthy(String name, Process process, String baseUrl, Path logFile)
             throws Exception {
         long deadline = System.nanoTime() + STARTUP_TIMEOUT.toNanos();
