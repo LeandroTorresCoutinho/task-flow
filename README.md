@@ -4,7 +4,7 @@ Reactive task management built as two Spring Boot microservices.
 
 Both services start, apply their own Liquibase migrations, and expose health endpoints. The auth
 service supports registration and login with BCrypt password hashing and RS256 JWTs. Authenticated
-users can create, list, and read their own tasks through the task service.
+users can create, list, read, update, and delete their own tasks through the task service.
 
 ## Architecture
 
@@ -95,8 +95,20 @@ docker compose down
 ```
 
 Each service integration test starts an isolated PostgreSQL container and applies its Liquibase
-changelog. Task-service also runs Karate scenarios against the application on a random port. Docker
-must be running; the development database does not need to be running.
+changelog. Docker must be running; the development database does not need to be running.
+
+Run the complete cross-service API suite with:
+
+```bash
+./auth-service/mvnw -f pom.xml verify
+```
+
+The `verify` lifecycle packages both applications, starts a fresh PostgreSQL container, generates
+temporary RSA keys, launches auth-service and task-service on available ports, and runs Karate with
+real access tokens. The suite covers the complete task lifecycle, stale updates, cross-user
+isolation, authentication failures, and invalid inputs. Service processes and the database are
+stopped after the run. Karate reports are written to `task-service/target/karate-reports`, and
+service startup logs are written to `task-service/target/api-integration-logs`.
 
 ## Configuration
 

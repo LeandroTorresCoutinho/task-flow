@@ -16,6 +16,7 @@
     <properties>
         <java.version>21</java.version>
         <karate.version>2.1.4</karate.version>
+        <maven-failsafe-plugin.version>3.5.6</maven-failsafe-plugin.version>
     </properties>
     <dependencies>
         <dependency>
@@ -101,6 +102,26 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>${maven-failsafe-plugin.version}</version>
+                <configuration>
+                    <systemPropertyVariables>
+                        <integration.auth-service-jar>${project.basedir}/../auth-service/target/auth-service-0.0.1-SNAPSHOT.jar</integration.auth-service-jar>
+                        <integration.task-service-jar>${project.build.directory}/${project.build.finalName}.jar</integration.task-service-jar>
+                        <integration.logs-directory>${project.build.directory}/api-integration-logs</integration.logs-directory>
+                    </systemPropertyVariables>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
