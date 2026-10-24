@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.task.taskservice.error.StaleTaskVersionException;
 import com.task.taskservice.error.TaskNotFoundException;
 import java.time.Clock;
 import java.time.Instant;
@@ -91,6 +92,76 @@ class TaskServiceTest {
         verify(tasks, never()).findByOwnerIdOrderByCreatedAtDescIdDesc(any(UUID.class), any(Limit.class));
     }
 
+    @Test
+    void updatesOwnedTaskAndPreservesServerManagedFields() {
+        UUID ownerId = UUID.randomUUID();
+        Task task = task(ownerId);
+        var request = new UpdateTaskRequest(
+                "Ship release", "Deploy the release", TaskStatus.DONE, LocalDate.parse("2026-11-01"), task.version());
+        when(tasks.findByIdAndOwnerId(task.id(), ownerId)).thenReturn(Mono.just(task));
+        when(tasks.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+
+        TaskResponse response = service.update(ownerId, task.id(), request).block();
+
+        var savedTask = ArgumentCaptor.forClass(Task.class);
+        verify(tasks).save(savedTask.capture());
+        assertEquals(task.id(), savedTask.getValue().id());
+        assertEquals(ownerId, savedTask.getValue().ownerId());
+        assertEquals(task.createdAt(), savedTask.getValue().createdAt());
+        assertEquals(NOW, savedTask.getValue().updatedAt());
+        assertEquals(task.version(), savedTask.getValue().version());
+        assertEquals(request.title(), response.title());
+        assertEquals(request.description(), response.description());
+        assertEquals(request.status(), response.status());
+        assertEquals(request.dueDate(), response.dueDate());
+    }
+
+    @Test
+    void rejectsStaleUpdateWithoutSaving() {
+        UUID ownerId = UUID.randomUUID();
+        Task task = task(ownerId);
+        var request = new UpdateTaskRequest(
+                "Ship release", "Deploy the release", TaskStatus.DONE, LocalDate.parse("2026-11-01"), 1L);
+        when(tasks.findByIdAndOwnerId(task.id(), ownerId)).thenReturn(Mono.just(task));
+
+        assertThrows(StaleTaskVersionException.class, () -> service.update(ownerId, task.id(), request).block());
+        verify(tasks, never()).save(any(Task.class));
+    }
+
+    @Test
+    void hidesTaskWhenUpdateOwnerDoesNotMatch() {
+        UUID taskId = UUID.randomUUID();
+        UUID otherOwnerId = UUID.randomUUID();
+        var request = new UpdateTaskRequest(
+                "Ship release", "Deploy the release", TaskStatus.DONE, LocalDate.parse("2026-11-01"), 0L);
+        when(tasks.findByIdAndOwnerId(taskId, otherOwnerId)).thenReturn(Mono.empty());
+
+        assertThrows(TaskNotFoundException.class, () -> service.update(otherOwnerId, taskId, request).block());
+        verify(tasks, never()).save(any(Task.class));
+    }
+
+    @Test
+    void deletesOwnedTask() {
+        UUID ownerId = UUID.randomUUID();
+        Task task = task(ownerId);
+        when(tasks.findByIdAndOwnerId(task.id(), ownerId)).thenReturn(Mono.just(task));
+        when(tasks.delete(task)).thenReturn(Mono.empty());
+
+        service.delete(ownerId, task.id()).block();
+
+        verify(tasks).delete(task);
+    }
+
+    @Test
+    void hidesTaskWhenDeleteOwnerDoesNotMatch() {
+        UUID taskId = UUID.randomUUID();
+        UUID otherOwnerId = UUID.randomUUID();
+        when(tasks.findByIdAndOwnerId(taskId, otherOwnerId)).thenReturn(Mono.empty());
+
+        assertThrows(TaskNotFoundException.class, () -> service.delete(otherOwnerId, taskId).block());
+        verify(tasks, never()).delete(any(Task.class));
+    }
+
     private Task task(UUID ownerId) {
         return new Task(
                 UUID.randomUUID(),
@@ -99,8 +170,8 @@ class TaskServiceTest {
                 "Complete the checklist",
                 TaskStatus.TODO,
                 LocalDate.parse("2026-10-30"),
-                NOW,
-                NOW,
+                NOW.minusSeconds(60),
+                NOW.minusSeconds(60),
                 0L);
     }
 }

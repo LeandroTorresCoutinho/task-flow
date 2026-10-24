@@ -11,7 +11,8 @@ public record TaskResponse(
         TaskStatus status,
         LocalDate dueDate,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        Long version) {
 
     static TaskResponse from(Task task) {
         return new TaskResponse(
@@ -21,6 +22,7 @@ public record TaskResponse(
                 task.status(),
                 task.dueDate(),
                 task.createdAt(),
-                task.updatedAt());
+                task.updatedAt(),
+                task.version());
     }
 }
