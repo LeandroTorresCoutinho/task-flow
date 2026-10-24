@@ -32,3 +32,28 @@ Feature: Create and read a task
     When method get
     Then status 200
     And match response == createdTask
+
+  Scenario: Another user cannot read the task
+    Given url karate.properties['task.base-url']
+    And path 'api', 'v1', 'tasks'
+    And header Authorization = 'Bearer user-a-token'
+    And request
+      """
+      {
+        "title": "Private task",
+        "description": "Visible only to its owner",
+        "status": "TODO",
+        "dueDate": "2026-10-31"
+      }
+      """
+    When method post
+    Then status 201
+    * def taskId = response.id
+
+    Given url karate.properties['task.base-url']
+    And path 'api', 'v1', 'tasks', taskId
+    And header Authorization = 'Bearer user-b-token'
+    When method get
+    Then status 404
+    And match response.code == 'TASK_NOT_FOUND'
+    And match response.message == 'Task not found'

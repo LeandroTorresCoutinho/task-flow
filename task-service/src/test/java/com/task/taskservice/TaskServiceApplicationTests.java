@@ -34,6 +34,7 @@ import reactor.core.publisher.Mono;
 class TaskServiceApplicationTests {
 
     private static final UUID USER_A_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    private static final UUID USER_B_ID = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
     @Container
     static final PostgreSQLContainer postgres =
@@ -119,12 +120,19 @@ class TaskServiceApplicationTests {
 
         @Bean
         ReactiveJwtDecoder jwtDecoder() {
-            return token -> Mono.just(Jwt.withTokenValue(token)
-                    .header("alg", "RS256")
-                    .subject(USER_A_ID.toString())
-                    .issuedAt(Instant.now())
-                    .expiresAt(Instant.now().plusSeconds(3600))
-                    .build());
+            return token -> {
+                UUID ownerId = switch (token) {
+                    case "user-a-token" -> USER_A_ID;
+                    case "user-b-token" -> USER_B_ID;
+                    default -> throw new IllegalArgumentException("Unknown test token");
+                };
+                return Mono.just(Jwt.withTokenValue(token)
+                        .header("alg", "RS256")
+                        .subject(ownerId.toString())
+                        .issuedAt(Instant.now())
+                        .expiresAt(Instant.now().plusSeconds(3600))
+                        .build());
+            };
         }
     }
 
