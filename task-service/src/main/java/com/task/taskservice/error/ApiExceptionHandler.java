@@ -1,6 +1,7 @@
 package com.task.taskservice.error;
 
 import java.time.Instant;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.support.WebExchangeBindException;
@@ -15,6 +16,12 @@ class ApiExceptionHandler {
     @ExceptionHandler(TaskNotFoundException.class)
     ResponseEntity<ApiError> taskNotFound(TaskNotFoundException exception) {
         return error(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND", exception.getMessage());
+    }
+
+    @ExceptionHandler({StaleTaskVersionException.class, OptimisticLockingFailureException.class})
+    ResponseEntity<ApiError> staleTaskVersion() {
+        return error(
+                HttpStatus.CONFLICT, "STALE_TASK_VERSION", "Task was modified by another request");
     }
 
     @ExceptionHandler(WebExchangeBindException.class)

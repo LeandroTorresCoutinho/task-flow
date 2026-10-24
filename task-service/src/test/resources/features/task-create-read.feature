@@ -22,6 +22,7 @@ Feature: Create and read a task
     And match response.dueDate == '2026-10-30'
     And match response.createdAt == '#string'
     And match response.updatedAt == '#string'
+    And match response.version == 0
     * def taskId = response.id
     * def createdTask = response
     And match header Location == '/api/v1/tasks/' + taskId

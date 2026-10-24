@@ -11,4 +11,6 @@ public interface TaskRepository extends ReactiveCrudRepository<Task, UUID> {
     Mono<Task> findByIdAndOwnerId(UUID id, UUID ownerId);
 
     Flux<Task> findByOwnerIdOrderByCreatedAtDescIdDesc(UUID ownerId, Limit limit);
+
+    Mono<Long> deleteByIdAndOwnerIdAndVersion(UUID id, UUID ownerId, Long version);
 }

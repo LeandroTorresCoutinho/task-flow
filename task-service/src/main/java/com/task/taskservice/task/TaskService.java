@@ -1,7 +1,9 @@
 package com.task.taskservice.task;
 
+import com.task.taskservice.error.StaleTaskVersionException;
 import com.task.taskservice.error.TaskNotFoundException;
 import java.time.Clock;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Limit;
@@ -41,9 +43,7 @@ public class TaskService {
     }
 
     public Mono<TaskResponse> get(UUID ownerId, UUID taskId) {
-        return tasks.findByIdAndOwnerId(taskId, ownerId)
-                .switchIfEmpty(Mono.error(TaskNotFoundException::new))
-                .map(TaskResponse::from);
+        return findOwned(ownerId, taskId).map(TaskResponse::from);
     }
 
     public Flux<TaskResponse> list(UUID ownerId, int limit) {
@@ -51,5 +51,37 @@ public class TaskService {
             return Flux.error(new IllegalArgumentException("limit must be between 1 and " + MAX_LIST_LIMIT));
         }
         return tasks.findByOwnerIdOrderByCreatedAtDescIdDesc(ownerId, Limit.of(limit)).map(TaskResponse::from);
+    }
+
+    public Mono<TaskResponse> update(UUID ownerId, UUID taskId, UpdateTaskRequest request) {
+        return findOwned(ownerId, taskId)
+                .flatMap(task -> {
+                    if (!Objects.equals(task.version(), request.version())) {
+                        return Mono.error(new StaleTaskVersionException());
+                    }
+                    var updated = new Task(
+                            task.id(),
+                            task.ownerId(),
+                            request.title(),
+                            request.description(),
+                            request.status(),
+                            request.dueDate(),
+                            task.createdAt(),
+                            clock.instant(),
+                            task.version());
+                    return tasks.save(updated);
+                })
+                .map(TaskResponse::from);
+    }
+
+    public Mono<Void> delete(UUID ownerId, UUID taskId) {
+        return findOwned(ownerId, taskId)
+                .flatMap(task -> tasks.deleteByIdAndOwnerIdAndVersion(task.id(), task.ownerId(), task.version()))
+                .flatMap(deleted -> deleted == 0 ? Mono.error(new StaleTaskVersionException()) : Mono.empty());
+    }
+
+    private Mono<Task> findOwned(UUID ownerId, UUID taskId) {
+        return tasks.findByIdAndOwnerId(taskId, ownerId)
+                .switchIfEmpty(Mono.error(TaskNotFoundException::new));
     }
 }
