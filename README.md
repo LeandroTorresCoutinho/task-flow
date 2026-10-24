@@ -129,6 +129,8 @@ starting.
 | `POST` | `http://localhost:8082/api/v1/tasks` | Create an owned task |
 | `GET` | `http://localhost:8082/api/v1/tasks?limit=20` | List owned tasks newest first |
 | `GET` | `http://localhost:8082/api/v1/tasks/{id}` | Read one owned task |
+| `PUT` | `http://localhost:8082/api/v1/tasks/{id}` | Update an owned task |
+| `DELETE` | `http://localhost:8082/api/v1/tasks/{id}` | Delete an owned task |
 
 Registration accepts `email` and `password`; passwords must contain at least 8 characters and no
 more than 72 UTF-8 bytes. Login returns `accessToken`, `tokenType`, and `expiresIn`. Authentication
@@ -149,8 +151,24 @@ Task endpoints require `Authorization: Bearer <accessToken>`. Creation accepts:
 must be `TODO`, `IN_PROGRESS`, or `DONE`. The list endpoint defaults to 20 tasks and accepts limits
 from 1 through 100. Clients cannot provide an owner ID; ownership always comes from the JWT.
 
-A missing task and a task owned by another user both return `404 TASK_NOT_FOUND`, preventing the
-API from revealing whether another user's task exists.
+Task responses include a numeric `version`. Updating a task uses the same editable fields as
+creation and must include the version returned by the most recent read:
+
+```json
+{
+  "title": "Ship release",
+  "description": "Deploy the completed release",
+  "status": "DONE",
+  "dueDate": "2026-11-01",
+  "version": 0
+}
+```
+
+A successful update increments the version. An update with an older version returns
+`409 STALE_TASK_VERSION`. Deleting an owned task returns `204 No Content`.
+
+A missing task and a task owned by another user return `404 TASK_NOT_FOUND` for reads, updates,
+and deletes, preventing the API from revealing whether another user's task exists.
 
 ## Key assumptions
 

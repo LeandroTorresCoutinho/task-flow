@@ -76,7 +76,8 @@ public class TaskService {
 
     public Mono<Void> delete(UUID ownerId, UUID taskId) {
         return findOwned(ownerId, taskId)
-                .flatMap(tasks::delete);
+                .flatMap(task -> tasks.deleteByIdAndOwnerIdAndVersion(task.id(), task.ownerId(), task.version()))
+                .flatMap(deleted -> deleted == 0 ? Mono.error(new StaleTaskVersionException()) : Mono.empty());
     }
 
     private Mono<Task> findOwned(UUID ownerId, UUID taskId) {

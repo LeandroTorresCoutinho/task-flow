@@ -1,6 +1,7 @@
 package com.task.taskservice;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.task.taskservice.task.Task;
@@ -18,6 +19,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -107,8 +109,64 @@ class TaskServiceApplicationTests {
     }
 
     @Test
+    void secondUpdateWithSameVersionIsRejected() {
+        var ownerId = UUID.randomUUID();
+        var createdAt = Instant.parse("2026-10-23T12:00:00Z");
+        Task saved = tasks.save(Task.create(
+                        UUID.randomUUID(),
+                        ownerId,
+                        "Initial title",
+                        "Initial description",
+                        TaskStatus.TODO,
+                        LocalDate.parse("2026-10-30"),
+                        createdAt))
+                .block();
+        var firstUpdate = changedTask(saved, "First update", createdAt.plusSeconds(60));
+        var staleUpdate = changedTask(saved, "Stale update", createdAt.plusSeconds(120));
+
+        Task updated = tasks.save(firstUpdate).block();
+
+        assertThrows(OptimisticLockingFailureException.class, () -> tasks.save(staleUpdate).block());
+        Task persisted = tasks.findById(saved.id()).block();
+        assertEquals("First update", persisted.title());
+        assertEquals(updated.version(), persisted.version());
+    }
+
+    @Test
+    void staleVersionCannotDeleteNewerVersion() {
+        var ownerId = UUID.randomUUID();
+        var createdAt = Instant.parse("2026-10-23T12:00:00Z");
+        Task stale = tasks.save(Task.create(
+                        UUID.randomUUID(),
+                        ownerId,
+                        "Initial title",
+                        "Initial description",
+                        TaskStatus.TODO,
+                        LocalDate.parse("2026-10-30"),
+                        createdAt))
+                .block();
+        Task updated = tasks.save(changedTask(stale, "Updated title", createdAt.plusSeconds(60))).block();
+
+        long deleted = tasks.deleteByIdAndOwnerIdAndVersion(stale.id(), stale.ownerId(), stale.version()).block();
+
+        assertEquals(0, deleted);
+        Task persisted = tasks.findById(stale.id()).block();
+        assertEquals("Updated title", persisted.title());
+        assertEquals(updated.version(), persisted.version());
+    }
+
+    @Test
     void userCanCreateAndReadTaskThroughHttp() {
         SuiteResult result = Runner.path("classpath:features/task-create-read.feature")
+                .systemProperty("task.base-url", "http://localhost:" + port)
+                .parallel(1);
+
+        assertTrue(result.isPassed());
+    }
+
+    @Test
+    void userCanUpdateAndDeleteTaskThroughHttp() {
+        SuiteResult result = Runner.path("classpath:features/task-lifecycle.feature")
                 .systemProperty("task.base-url", "http://localhost:" + port)
                 .parallel(1);
 
@@ -139,5 +197,18 @@ class TaskServiceApplicationTests {
     private static String r2dbcUrl(String schema) {
         return "r2dbc:postgresql://%s:%d/%s?schema=%s"
                 .formatted(postgres.getHost(), postgres.getMappedPort(5432), postgres.getDatabaseName(), schema);
+    }
+
+    private static Task changedTask(Task task, String title, Instant updatedAt) {
+        return new Task(
+                task.id(),
+                task.ownerId(),
+                title,
+                task.description(),
+                TaskStatus.IN_PROGRESS,
+                task.dueDate(),
+                task.createdAt(),
+                updatedAt,
+                task.version());
     }
 }

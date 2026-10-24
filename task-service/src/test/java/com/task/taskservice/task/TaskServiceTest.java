@@ -145,11 +145,21 @@ class TaskServiceTest {
         UUID ownerId = UUID.randomUUID();
         Task task = task(ownerId);
         when(tasks.findByIdAndOwnerId(task.id(), ownerId)).thenReturn(Mono.just(task));
-        when(tasks.delete(task)).thenReturn(Mono.empty());
+        when(tasks.deleteByIdAndOwnerIdAndVersion(task.id(), ownerId, task.version())).thenReturn(Mono.just(1L));
 
         service.delete(ownerId, task.id()).block();
 
-        verify(tasks).delete(task);
+        verify(tasks).deleteByIdAndOwnerIdAndVersion(task.id(), ownerId, task.version());
+    }
+
+    @Test
+    void rejectsDeleteWhenTaskChangesAfterLookup() {
+        UUID ownerId = UUID.randomUUID();
+        Task task = task(ownerId);
+        when(tasks.findByIdAndOwnerId(task.id(), ownerId)).thenReturn(Mono.just(task));
+        when(tasks.deleteByIdAndOwnerIdAndVersion(task.id(), ownerId, task.version())).thenReturn(Mono.just(0L));
+
+        assertThrows(StaleTaskVersionException.class, () -> service.delete(ownerId, task.id()).block());
     }
 
     @Test
@@ -159,7 +169,7 @@ class TaskServiceTest {
         when(tasks.findByIdAndOwnerId(taskId, otherOwnerId)).thenReturn(Mono.empty());
 
         assertThrows(TaskNotFoundException.class, () -> service.delete(otherOwnerId, taskId).block());
-        verify(tasks, never()).delete(any(Task.class));
+        verify(tasks, never()).deleteByIdAndOwnerIdAndVersion(any(UUID.class), any(UUID.class), any(Long.class));
     }
 
     private Task task(UUID ownerId) {
