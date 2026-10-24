@@ -1,27 +1,39 @@
 package com.task.taskservice;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.task.taskservice.task.Task;
 import com.task.taskservice.task.TaskRepository;
 import com.task.taskservice.task.TaskStatus;
+import io.karatelabs.core.Runner;
+import io.karatelabs.core.SuiteResult;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import reactor.core.publisher.Mono;
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(TaskServiceApplicationTests.TestJwtConfiguration.class)
 class TaskServiceApplicationTests {
+
+    private static final UUID USER_A_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 
     @Container
     static final PostgreSQLContainer postgres =
@@ -60,6 +72,7 @@ class TaskServiceApplicationTests {
 
     @Test
     void savedTaskCanBeUpdated() {
+        long taskCountBeforeTest = tasks.count().block();
         var ownerId = UUID.randomUUID();
         var createdAt = Instant.parse("2026-10-23T12:00:00Z");
         var created = Task.create(
@@ -89,7 +102,30 @@ class TaskServiceApplicationTests {
         assertEquals(TaskStatus.IN_PROGRESS, updated.status());
         assertEquals(updatedAt, updated.updatedAt());
         assertEquals(saved.version() + 1, updated.version());
-        assertEquals(1L, tasks.count().block());
+        assertEquals(taskCountBeforeTest + 1, tasks.count().block());
+    }
+
+    @Test
+    void userCanCreateAndReadTaskThroughHttp() {
+        SuiteResult result = Runner.path("classpath:features/task-create-read.feature")
+                .systemProperty("task.base-url", "http://localhost:" + port)
+                .parallel(1);
+
+        assertTrue(result.isPassed());
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TestJwtConfiguration {
+
+        @Bean
+        ReactiveJwtDecoder jwtDecoder() {
+            return token -> Mono.just(Jwt.withTokenValue(token)
+                    .header("alg", "RS256")
+                    .subject(USER_A_ID.toString())
+                    .issuedAt(Instant.now())
+                    .expiresAt(Instant.now().plusSeconds(3600))
+                    .build());
+        }
     }
 
     private static String r2dbcUrl(String schema) {
