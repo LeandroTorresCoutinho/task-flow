@@ -25,7 +25,8 @@ import reactor.core.publisher.Mono;
 
 class TaskServiceTest {
 
-    private static final Instant NOW = Instant.parse("2026-10-23T12:00:00Z");
+    private static final Instant NOW = Instant.parse("2026-10-23T12:00:00.123456789Z");
+    private static final Instant DATABASE_NOW = Instant.parse("2026-10-23T12:00:00.123456Z");
 
     private final TaskRepository tasks = mock(TaskRepository.class);
     private TaskService service;
@@ -47,8 +48,8 @@ class TaskServiceTest {
         var savedTask = ArgumentCaptor.forClass(Task.class);
         verify(tasks).save(savedTask.capture());
         assertEquals(ownerId, savedTask.getValue().ownerId());
-        assertEquals(NOW, savedTask.getValue().createdAt());
-        assertEquals(NOW, savedTask.getValue().updatedAt());
+        assertEquals(DATABASE_NOW, savedTask.getValue().createdAt());
+        assertEquals(DATABASE_NOW, savedTask.getValue().updatedAt());
         assertNotNull(response.id());
     }
 
@@ -108,7 +109,7 @@ class TaskServiceTest {
         assertEquals(task.id(), savedTask.getValue().id());
         assertEquals(ownerId, savedTask.getValue().ownerId());
         assertEquals(task.createdAt(), savedTask.getValue().createdAt());
-        assertEquals(NOW, savedTask.getValue().updatedAt());
+        assertEquals(DATABASE_NOW, savedTask.getValue().updatedAt());
         assertEquals(task.version(), savedTask.getValue().version());
         assertEquals(request.title(), response.title());
         assertEquals(request.description(), response.description());

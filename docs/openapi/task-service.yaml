@@ -1,0 +1,219 @@
+openapi: 3.1.0
+info:
+  title: Task Flow Task API
+  version: 1.0.0
+  description: Manages tasks owned by the authenticated user.
+servers:
+  - url: http://localhost:8082
+    description: Local Docker Compose
+security:
+  - bearerAuth: []
+tags:
+  - name: Tasks
+paths:
+  /api/v1/tasks:
+    post:
+      tags: [Tasks]
+      summary: Create a task
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+      responses:
+        "201":
+          description: Task created
+          headers:
+            Location:
+              description: Relative URL of the created task.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags: [Tasks]
+      summary: List the current user's tasks
+      operationId: listTasks
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of tasks, newest first.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Tasks owned by the current user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/tasks/{taskId}:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      tags: [Tasks]
+      summary: Get a task owned by the current user
+      operationId: getTask
+      responses:
+        "200":
+          description: Task found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Tasks]
+      summary: Replace a task using optimistic concurrency
+      operationId: updateTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskRequest"
+      responses:
+        "200":
+          description: Task updated; the returned version is incremented.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The supplied version is stale.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      tags: [Tasks]
+      summary: Delete a task owned by the current user
+      operationId: deleteTask
+      responses:
+        "204":
+          description: Task deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Request body, path, or query parameter is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    Unauthorized:
+      description: A valid bearer token is required.
+    NotFound:
+      description: The task does not exist or belongs to another user.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+  schemas:
+    TaskFields:
+      type: object
+      required: [title, description, status, dueDate]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: ".*\\S.*"
+        description:
+          type: string
+          minLength: 1
+          pattern: ".*\\S.*"
+        status:
+          type: string
+          enum: [TODO, IN_PROGRESS, DONE]
+        dueDate:
+          type: string
+          format: date
+    CreateTaskRequest:
+      allOf:
+        - $ref: "#/components/schemas/TaskFields"
+    UpdateTaskRequest:
+      allOf:
+        - $ref: "#/components/schemas/TaskFields"
+        - type: object
+          required: [version]
+          properties:
+            version:
+              type: integer
+              format: int64
+              minimum: 0
+    Task:
+      allOf:
+        - $ref: "#/components/schemas/TaskFields"
+        - type: object
+          required: [id, createdAt, updatedAt, version]
+          properties:
+            id:
+              type: string
+              format: uuid
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            version:
+              type: integer
+              format: int64
+              minimum: 0
+    ApiError:
+      type: object
+      required: [timestamp, status, code, message]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        code:
+          type: string
+          examples: [TASK_NOT_FOUND]
+        message:
+          type: string

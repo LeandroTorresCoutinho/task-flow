@@ -3,6 +3,8 @@ package com.task.taskservice.task;
 import com.task.taskservice.error.StaleTaskVersionException;
 import com.task.taskservice.error.TaskNotFoundException;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,7 +40,7 @@ public class TaskService {
                 request.description(),
                 request.status(),
                 request.dueDate(),
-                clock.instant());
+                databaseTimestamp());
         return tasks.save(task).map(TaskResponse::from);
     }
 
@@ -67,7 +69,7 @@ public class TaskService {
                             request.status(),
                             request.dueDate(),
                             task.createdAt(),
-                            clock.instant(),
+                            databaseTimestamp(),
                             task.version());
                     return tasks.save(updated);
                 })
@@ -83,5 +85,9 @@ public class TaskService {
     private Mono<Task> findOwned(UUID ownerId, UUID taskId) {
         return tasks.findByIdAndOwnerId(taskId, ownerId)
                 .switchIfEmpty(Mono.error(TaskNotFoundException::new));
+    }
+
+    private Instant databaseTimestamp() {
+        return clock.instant().truncatedTo(ChronoUnit.MICROS);
     }
 }
