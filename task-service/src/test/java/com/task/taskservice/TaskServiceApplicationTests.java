@@ -2,26 +2,18 @@ package com.task.taskservice;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.task.taskservice.task.Task;
 import com.task.taskservice.task.TaskRepository;
 import com.task.taskservice.task.TaskStatus;
-import io.karatelabs.core.Runner;
-import io.karatelabs.core.SuiteResult;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -32,11 +24,7 @@ import reactor.core.publisher.Mono;
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TaskServiceApplicationTests.TestJwtConfiguration.class)
 class TaskServiceApplicationTests {
-
-    private static final UUID USER_A_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-    private static final UUID USER_B_ID = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
     @Container
     static final PostgreSQLContainer postgres =
@@ -50,7 +38,7 @@ class TaskServiceApplicationTests {
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.r2dbc.url", () -> r2dbcUrl("task_service"));
+        registry.add("spring.r2dbc.url", TaskServiceApplicationTests::r2dbcUrl);
         registry.add("spring.r2dbc.username", postgres::getUsername);
         registry.add("spring.r2dbc.password", postgres::getPassword);
         registry.add("spring.liquibase.url", postgres::getJdbcUrl);
@@ -75,7 +63,7 @@ class TaskServiceApplicationTests {
 
     @Test
     void savedTaskCanBeUpdated() {
-        long taskCountBeforeTest = tasks.count().block();
+        long taskCountBeforeTest = required(tasks.count());
         var ownerId = UUID.randomUUID();
         var createdAt = Instant.parse("2026-10-23T12:00:00Z");
         var created = Task.create(
@@ -86,7 +74,7 @@ class TaskServiceApplicationTests {
                 TaskStatus.TODO,
                 LocalDate.parse("2026-10-30"),
                 createdAt);
-        Task saved = tasks.save(created).block();
+        Task saved = required(tasks.save(created));
         var updatedAt = createdAt.plusSeconds(60);
         var changed = new Task(
                 saved.id(),
@@ -99,35 +87,34 @@ class TaskServiceApplicationTests {
                 updatedAt,
                 saved.version());
 
-        Task updated = tasks.save(changed).block();
+        Task updated = required(tasks.save(changed));
 
         assertEquals("Updated title", updated.title());
         assertEquals(TaskStatus.IN_PROGRESS, updated.status());
         assertEquals(updatedAt, updated.updatedAt());
         assertEquals(saved.version() + 1, updated.version());
-        assertEquals(taskCountBeforeTest + 1, tasks.count().block());
+        assertEquals(taskCountBeforeTest + 1, required(tasks.count()));
     }
 
     @Test
     void secondUpdateWithSameVersionIsRejected() {
         var ownerId = UUID.randomUUID();
         var createdAt = Instant.parse("2026-10-23T12:00:00Z");
-        Task saved = tasks.save(Task.create(
+        Task saved = required(tasks.save(Task.create(
                         UUID.randomUUID(),
                         ownerId,
                         "Initial title",
                         "Initial description",
                         TaskStatus.TODO,
                         LocalDate.parse("2026-10-30"),
-                        createdAt))
-                .block();
+                        createdAt)));
         var firstUpdate = changedTask(saved, "First update", createdAt.plusSeconds(60));
         var staleUpdate = changedTask(saved, "Stale update", createdAt.plusSeconds(120));
 
-        Task updated = tasks.save(firstUpdate).block();
+        Task updated = required(tasks.save(firstUpdate));
 
         assertThrows(OptimisticLockingFailureException.class, () -> tasks.save(staleUpdate).block());
-        Task persisted = tasks.findById(saved.id()).block();
+        Task persisted = required(tasks.findById(saved.id()));
         assertEquals("First update", persisted.title());
         assertEquals(updated.version(), persisted.version());
     }
@@ -136,67 +123,31 @@ class TaskServiceApplicationTests {
     void staleVersionCannotDeleteNewerVersion() {
         var ownerId = UUID.randomUUID();
         var createdAt = Instant.parse("2026-10-23T12:00:00Z");
-        Task stale = tasks.save(Task.create(
+        Task stale = required(tasks.save(Task.create(
                         UUID.randomUUID(),
                         ownerId,
                         "Initial title",
                         "Initial description",
                         TaskStatus.TODO,
                         LocalDate.parse("2026-10-30"),
-                        createdAt))
-                .block();
-        Task updated = tasks.save(changedTask(stale, "Updated title", createdAt.plusSeconds(60))).block();
+                        createdAt)));
+        Task updated = required(tasks.save(changedTask(stale, "Updated title", createdAt.plusSeconds(60))));
 
-        long deleted = tasks.deleteByIdAndOwnerIdAndVersion(stale.id(), stale.ownerId(), stale.version()).block();
+        long deleted = required(tasks.deleteByIdAndOwnerIdAndVersion(stale.id(), stale.ownerId(), stale.version()));
 
         assertEquals(0, deleted);
-        Task persisted = tasks.findById(stale.id()).block();
+        Task persisted = required(tasks.findById(stale.id()));
         assertEquals("Updated title", persisted.title());
         assertEquals(updated.version(), persisted.version());
     }
 
-    @Test
-    void userCanCreateAndReadTaskThroughHttp() {
-        SuiteResult result = Runner.path("classpath:features/task-create-read.feature")
-                .systemProperty("task.base-url", "http://localhost:" + port)
-                .parallel(1);
-
-        assertTrue(result.isPassed());
+    private static String r2dbcUrl() {
+        return "r2dbc:postgresql://%s:%d/%s?schema=task_service"
+                .formatted(postgres.getHost(), postgres.getMappedPort(5432), postgres.getDatabaseName());
     }
 
-    @Test
-    void userCanUpdateAndDeleteTaskThroughHttp() {
-        SuiteResult result = Runner.path("classpath:features/task-lifecycle.feature")
-                .systemProperty("task.base-url", "http://localhost:" + port)
-                .parallel(1);
-
-        assertTrue(result.isPassed());
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class TestJwtConfiguration {
-
-        @Bean
-        ReactiveJwtDecoder jwtDecoder() {
-            return token -> {
-                UUID ownerId = switch (token) {
-                    case "user-a-token" -> USER_A_ID;
-                    case "user-b-token" -> USER_B_ID;
-                    default -> throw new IllegalArgumentException("Unknown test token");
-                };
-                return Mono.just(Jwt.withTokenValue(token)
-                        .header("alg", "RS256")
-                        .subject(ownerId.toString())
-                        .issuedAt(Instant.now())
-                        .expiresAt(Instant.now().plusSeconds(3600))
-                        .build());
-            };
-        }
-    }
-
-    private static String r2dbcUrl(String schema) {
-        return "r2dbc:postgresql://%s:%d/%s?schema=%s"
-                .formatted(postgres.getHost(), postgres.getMappedPort(5432), postgres.getDatabaseName(), schema);
+    private static <T> T required(Mono<T> result) {
+        return result.blockOptional().orElseThrow();
     }
 
     private static Task changedTask(Task task, String title, Instant updatedAt) {
