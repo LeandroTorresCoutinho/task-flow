@@ -1,6 +1,12 @@
 spring:
   application:
     name: task-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: "${TASK_JWT_ISSUER:https://task-flow.local/auth}"
+          jwk-set-uri: "${TASK_JWT_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}"
   r2dbc:
     url: "${TASK_DB_R2DBC_URL:r2dbc:postgresql://localhost:5432/task_flow?schema=task_service}"
     username: "${TASK_DB_USERNAME:task_flow}"

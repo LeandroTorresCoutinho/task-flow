@@ -18,6 +18,14 @@ spring:
 server:
   port: "${AUTH_SERVICE_PORT:8081}"
 
+auth:
+  jwt:
+    private-key: "${AUTH_JWT_PRIVATE_KEY:file:./.secrets/jwt-private.pem}"
+    public-key: "${AUTH_JWT_PUBLIC_KEY:file:./.secrets/jwt-public.pem}"
+    key-id: "${AUTH_JWT_KEY_ID:task-flow-key-1}"
+    issuer: "${AUTH_JWT_ISSUER:https://task-flow.local/auth}"
+    ttl: "${AUTH_JWT_TTL:PT1H}"
+
 management:
   endpoints:
     web:
