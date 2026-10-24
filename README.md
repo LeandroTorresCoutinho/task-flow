@@ -3,8 +3,8 @@
 Reactive task management built as two Spring Boot microservices.
 
 Both services start, apply their own Liquibase migrations, and expose health endpoints. The auth
-service also supports registration and login with BCrypt password hashing and RS256 JWTs. Task
-CRUD is the next implementation stage.
+service supports registration and login with BCrypt password hashing and RS256 JWTs. Authenticated
+users can create, list, and read their own tasks through the task service.
 
 ## Architecture
 
@@ -17,7 +17,7 @@ flowchart LR
     TaskSchema[(task_service schema)]
 
     Client -->|register and login| Auth
-    Client -->|Bearer RS256 JWT<br/>planned| Tasks
+    Client -->|Bearer RS256 JWT| Tasks
     Auth -->|R2DBC| AuthSchema
     Tasks -->|R2DBC| TaskSchema
     Tasks -.->|fetch and cache JWKS| Auth
@@ -25,7 +25,7 @@ flowchart LR
 
 The services share one PostgreSQL instance for local development but own separate schemas. They
 do not read each other's tables, and the task schema deliberately has no foreign key to the user
-schema. The future task API will take the owner ID from the JWT `sub` claim.
+schema. The task API takes the owner ID from the verified JWT `sub` claim.
 
 
 ## Technology
@@ -36,7 +36,7 @@ schema. The future task API will take the owner ID from the JWT `sub` claim.
 - Spring Data R2DBC with PostgreSQL
 - Liquibase migrations using JDBC during startup
 - Maven multi-module build
-- JUnit 5 and Testcontainers
+- JUnit 5, Karate, and Testcontainers
 
 ## Prerequisites
 
@@ -94,9 +94,9 @@ docker compose down
 ./auth-service/mvnw -f pom.xml test
 ```
 
-Each service test starts an isolated PostgreSQL container, applies its Liquibase changelog,
-starts the application on a random port, and verifies its health endpoint. Docker must be running;
-the development database does not need to be running.
+Each service integration test starts an isolated PostgreSQL container and applies its Liquibase
+changelog. Task-service also runs Karate scenarios against the application on a random port. Docker
+must be running; the development database does not need to be running.
 
 ## Configuration
 
@@ -126,20 +126,31 @@ starting.
 | `GET` | `http://localhost:8081/.well-known/jwks.json` | Public JWT signing keys |
 | `POST` | `http://localhost:8081/api/v1/auth/register` | Register a user |
 | `POST` | `http://localhost:8081/api/v1/auth/login` | Authenticate and issue an RS256 JWT |
+| `POST` | `http://localhost:8082/api/v1/tasks` | Create an owned task |
+| `GET` | `http://localhost:8082/api/v1/tasks?limit=20` | List owned tasks newest first |
+| `GET` | `http://localhost:8082/api/v1/tasks/{id}` | Read one owned task |
 
 Registration accepts `email` and `password`; passwords must contain at least 8 characters and no
 more than 72 UTF-8 bytes. Login returns `accessToken`, `tokenType`, and `expiresIn`. Authentication
 failures use the same response for an unknown email and an incorrect password.
 
-The planned task API is not implemented yet. Its intended surface is:
+Task endpoints require `Authorization: Bearer <accessToken>`. Creation accepts:
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `POST` | `/api/v1/tasks` | Create a task for the authenticated user |
-| `GET` | `/api/v1/tasks` | List the authenticated user's tasks |
-| `GET` | `/api/v1/tasks/{id}` | Read one owned task |
-| `PUT` | `/api/v1/tasks/{id}` | Replace one owned task |
-| `DELETE` | `/api/v1/tasks/{id}` | Delete one owned task |
+```json
+{
+  "title": "Prepare release",
+  "description": "Complete the release checklist",
+  "status": "TODO",
+  "dueDate": "2026-10-30"
+}
+```
+
+`title` and `description` must not be blank, `title` is limited to 200 characters, and `status`
+must be `TODO`, `IN_PROGRESS`, or `DONE`. The list endpoint defaults to 20 tasks and accepts limits
+from 1 through 100. Clients cannot provide an owner ID; ownership always comes from the JWT.
+
+A missing task and a task owned by another user both return `404 TASK_NOT_FOUND`, preventing the
+API from revealing whether another user's task exists.
 
 ## Key assumptions
 
