@@ -24,8 +24,8 @@ services:
       AUTH_DB_JDBC_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-task_flow}"
       AUTH_DB_USERNAME: "${POSTGRES_USER:-task_flow}"
       AUTH_DB_PASSWORD: "${POSTGRES_PASSWORD:-task_flow}"
-      AUTH_JWT_PRIVATE_KEY: "file:/run/secrets/jwt-private.pem"
-      AUTH_JWT_PUBLIC_KEY: "file:/run/secrets/jwt-public.pem"
+      AUTH_JWT_PRIVATE_KEY: "file:/run/app-secrets/jwt-private.pem"
+      AUTH_JWT_PUBLIC_KEY: "file:/run/app-secrets/jwt-public.pem"
       AUTH_JWT_KEY_ID: "${AUTH_JWT_KEY_ID:-task-flow-key-1}"
       AUTH_JWT_ISSUER: "http://auth-service:8081"
       AUTH_JWT_TTL: "${AUTH_JWT_TTL:-PT1H}"
@@ -33,9 +33,9 @@ services:
       - "${AUTH_SERVICE_PORT:-8081}:8081"
     secrets:
       - source: jwt-private-key
-        target: jwt-private.pem
+        target: /run/source-secrets/jwt-private.pem
       - source: jwt-public-key
-        target: jwt-public.pem
+        target: /run/source-secrets/jwt-public.pem
     depends_on:
       postgres:
         condition: service_healthy

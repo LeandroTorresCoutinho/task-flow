@@ -9,9 +9,10 @@ RUN mvn -B -ntp -pl auth-service package -DskipTests
 
 FROM eclipse-temurin:21-jre-alpine
 
+RUN apk add --no-cache su-exec
 WORKDIR /app
 COPY --from=build /workspace/auth-service/target/auth-service-0.0.1-SNAPSHOT.jar app.jar
-USER 10001
+COPY auth-service/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 EXPOSE 8081
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
-
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["java", "-jar", "/app/app.jar"]
