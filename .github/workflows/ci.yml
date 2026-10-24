@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run unit and cross-service integration tests
+        run: ./auth-service/mvnw -B -ntp -f pom.xml verify
+
+  clean-clone-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure local environment
+        run: |
+          cp .env.example .env
+          mkdir -p .secrets
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out .secrets/jwt-private.pem
+          openssl pkey -in .secrets/jwt-private.pem -pubout -out .secrets/jwt-public.pem
+
+      - name: Build and start the stack from the clone
+        run: docker compose up --build --detach --wait --wait-timeout 180
+
+      - name: Exercise the public API
+        run: ./scripts/smoke-test.sh
+
+      - name: Show container logs after a failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down --volumes

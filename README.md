@@ -1,10 +1,42 @@
 # Task Flow
 
-Reactive task management built as two Spring Boot microservices.
+Task Flow is a reactive task-management API built as two Spring Boot services. The auth service
+registers users and issues RS256 JWTs; the task service uses those tokens to isolate every user's
+tasks. Each service owns a PostgreSQL schema and its own Liquibase migrations.
 
-Both services start, apply their own Liquibase migrations, and expose health endpoints. The auth
-service supports registration and login with BCrypt password hashing and RS256 JWTs. Authenticated
-users can create, list, read, update, and delete their own tasks through the task service.
+## Quick start
+
+You need Git, Docker with Compose, OpenSSL, and curl. Java is only required when running or testing
+the services outside containers.
+
+```bash
+git clone https://github.com/LeandroTorresCoutinho/task-flow.git
+cd task-flow
+cp .env.example .env
+mkdir -p .secrets
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out .secrets/jwt-private.pem
+openssl pkey -in .secrets/jwt-private.pem -pubout -out .secrets/jwt-public.pem
+docker compose up --build --detach --wait
+```
+
+The first build downloads the Java and Maven images and may take a few minutes. When Compose
+finishes, auth is available at `http://localhost:8081` and tasks at `http://localhost:8082`.
+
+Verify registration, login, task creation, update, read, and deletion with:
+
+```bash
+./scripts/smoke-test.sh
+```
+
+Expected output:
+
+```text
+Smoke test passed: registration, login, and task lifecycle
+```
+
+Inspect status or logs with `docker compose ps` and `docker compose logs`. Stop the stack while
+preserving database data with `docker compose down`, or delete local data with
+`docker compose down --volumes`.
 
 ## Architecture
 
@@ -13,55 +45,85 @@ flowchart LR
     Client[API client]
     Auth[Auth service<br/>WebFlux :8081]
     Tasks[Task service<br/>WebFlux :8082]
-    AuthSchema[(auth_service schema)]
-    TaskSchema[(task_service schema)]
+    Database[(PostgreSQL)]
 
     Client -->|register and login| Auth
     Client -->|Bearer RS256 JWT| Tasks
-    Auth -->|R2DBC| AuthSchema
-    Tasks -->|R2DBC| TaskSchema
+    Auth -->|auth_service schema| Database
+    Tasks -->|task_service schema| Database
     Tasks -.->|fetch and cache JWKS| Auth
 ```
 
-The services share one PostgreSQL instance for local development but own separate schemas. They
-do not read each other's tables, and the task schema deliberately has no foreign key to the user
-schema. The task API takes the owner ID from the verified JWT `sub` claim.
+The normal task request path does not call auth. Task-service verifies tokens locally from auth's
+published JSON Web Key Set and takes the owner ID only from the verified JWT `sub` claim. The
+[architecture decision record](docs/adr/0001-service-boundaries-and-data-ownership.md) explains the
+trade-offs.
 
+## API documentation
 
-## Technology
+The versioned OpenAPI 3.1 contracts are:
 
-- Java 21
-- Spring Boot 4.1
-- Spring WebFlux and Project Reactor
-- Spring Data R2DBC with PostgreSQL
-- Liquibase migrations using JDBC during startup
-- Maven multi-module build
-- JUnit 5, Karate, and Testcontainers
+- [Auth service API](docs/openapi/auth-service.yaml)
+- [Task service API](docs/openapi/task-service.yaml)
 
-## Prerequisites
+The main endpoints are:
 
-- Java 21 or newer
-- Docker with Docker Compose
+| Service | Method | Endpoint | Purpose |
+| --- | --- | --- | --- |
+| Auth | `POST` | `/api/v1/auth/register` | Register a user |
+| Auth | `POST` | `/api/v1/auth/login` | Issue an access token |
+| Auth | `GET` | `/.well-known/jwks.json` | Publish JWT verification keys |
+| Tasks | `POST` | `/api/v1/tasks` | Create an owned task |
+| Tasks | `GET` | `/api/v1/tasks?limit=20` | List owned tasks, newest first |
+| Tasks | `GET` | `/api/v1/tasks/{taskId}` | Read an owned task |
+| Tasks | `PUT` | `/api/v1/tasks/{taskId}` | Update with the latest `version` |
+| Tasks | `DELETE` | `/api/v1/tasks/{taskId}` | Delete an owned task |
 
-## Run locally
+All task endpoints require `Authorization: Bearer <accessToken>`. A missing task and a task owned
+by another user both return `404 TASK_NOT_FOUND`, so ownership is not disclosed. Updates use the
+numeric `version` returned by the latest read and return `409 STALE_TASK_VERSION` if it is stale.
 
-Start PostgreSQL:
+Both services expose unauthenticated health checks at `/actuator/health`.
+
+## Configuration
+
+Copy [.env.example](.env.example) to `.env` before starting Compose. Its database credentials and
+published ports are local-development defaults; change them before using the stack in any shared
+environment. Compose uses service names for internal database and JWKS URLs, so host port changes
+do not break service-to-service communication.
+
+The JWT private key must be unencrypted PKCS#8 PEM and the public key must be X.509 PEM. Compose
+mounts them read-only from `.secrets`; both `.env` and `.secrets` are ignored by Git. Never commit a
+private key.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `POSTGRES_DB` | `task_flow` | Local database name |
+| `POSTGRES_USER` | `task_flow` | Local database user |
+| `POSTGRES_PASSWORD` | `task_flow` | Local database password |
+| `POSTGRES_PORT` | `5432` | PostgreSQL host port |
+| `AUTH_SERVICE_PORT` | `8081` | Auth host port |
+| `TASK_SERVICE_PORT` | `8082` | Task host port |
+| `AUTH_JWT_KEY_ID` | `task-flow-key-1` | Published signing-key ID |
+| `AUTH_JWT_TTL` | `PT1H` | Access-token lifetime |
+
+The example file also documents every variable used when launching the services directly. In a
+deployed environment, supply the keys through that platform's secret manager and set database
+credentials and JWT issuer explicitly.
+
+If you change the published service ports, pass their URLs to the smoke test:
 
 ```bash
-docker compose up -d postgres
+AUTH_BASE_URL=http://localhost:9081 TASK_BASE_URL=http://localhost:9082 ./scripts/smoke-test.sh
 ```
 
-Generate a local RSA key pair (the ignored `.secrets` directory keeps it out of Git):
+## Develop from source
+
+You need Java 21 and Docker. Start only PostgreSQL and generate keys as shown in Quick start, then
+run the services in separate terminals:
 
 ```bash
-mkdir -p .secrets
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out .secrets/jwt-private.pem
-openssl pkey -in .secrets/jwt-private.pem -pubout -out .secrets/jwt-public.pem
-```
-
-Start each service in a separate terminal:
-
-```bash
+docker compose up --detach postgres
 ./auth-service/mvnw -f pom.xml -pl auth-service spring-boot:run
 ```
 
@@ -69,125 +131,37 @@ Start each service in a separate terminal:
 ./auth-service/mvnw -f pom.xml -pl task-service spring-boot:run
 ```
 
-Check their health:
-
-```bash
-curl http://localhost:8081/actuator/health
-curl http://localhost:8082/actuator/health
-```
-
-Both responses should contain:
-
-```json
-{"status":"UP"}
-```
-
-Stop the development database without deleting its volume:
-
-```bash
-docker compose down
-```
+The services read the local defaults from their `application.yaml` files. Export values from
+`.env.example` when you need to override them.
 
 ## Test
 
-```bash
-./auth-service/mvnw -f pom.xml test
-```
-
-Each service integration test starts an isolated PostgreSQL container and applies its Liquibase
-changelog. Docker must be running; the development database does not need to be running.
-
-Run the complete cross-service API suite with:
+Run all unit tests:
 
 ```bash
-./auth-service/mvnw -f pom.xml verify
+./auth-service/mvnw -B -ntp -f pom.xml test
 ```
 
-The `verify` lifecycle packages both applications, starts a fresh PostgreSQL container, generates
-temporary RSA keys, launches auth-service and task-service on available ports, and runs Karate with
-real access tokens. The suite covers the complete task lifecycle, stale updates, cross-user
-isolation, authentication failures, and invalid inputs. Service processes and the database are
-stopped after the run. Karate reports are written to `task-service/target/karate-reports`, and
-service startup logs are written to `task-service/target/api-integration-logs`.
+Run unit tests plus the cross-service Karate suite:
 
-## Configuration
-
-Development defaults are defined in each service's `application.yaml`. Every value can be
-overridden through environment variables documented in [.env.example](.env.example). Defaults are
-local-only and must not be used as production credentials.
-
-Set `AUTH_JWT_PRIVATE_KEY` and `AUTH_JWT_PUBLIC_KEY` to external PEM resources in every deployed
-environment. The private key must be PKCS#8 and the public key X.509 encoded. Never commit the
-private key. Auth publishes only the public key at `/.well-known/jwks.json`; task-service discovers
-it through `TASK_JWT_JWK_SET_URI` and does not need a local key file.
-
-| Service | Port | Database schema | Liquibase changelog |
-| --- | ---: | --- | --- |
-| Auth | `8081` | `auth_service` | `auth-service/src/main/resources/db/changelog` |
-| Task | `8082` | `task_service` | `task-service/src/main/resources/db/changelog` |
-
-Application queries use R2DBC. Liquibase uses the PostgreSQL JDBC driver only while the service is
-starting.
-
-## Current API
-
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `GET` | `http://localhost:8081/actuator/health` | Auth service health |
-| `GET` | `http://localhost:8082/actuator/health` | Task service health |
-| `GET` | `http://localhost:8081/.well-known/jwks.json` | Public JWT signing keys |
-| `POST` | `http://localhost:8081/api/v1/auth/register` | Register a user |
-| `POST` | `http://localhost:8081/api/v1/auth/login` | Authenticate and issue an RS256 JWT |
-| `POST` | `http://localhost:8082/api/v1/tasks` | Create an owned task |
-| `GET` | `http://localhost:8082/api/v1/tasks?limit=20` | List owned tasks newest first |
-| `GET` | `http://localhost:8082/api/v1/tasks/{id}` | Read one owned task |
-| `PUT` | `http://localhost:8082/api/v1/tasks/{id}` | Update an owned task |
-| `DELETE` | `http://localhost:8082/api/v1/tasks/{id}` | Delete an owned task |
-
-Registration accepts `email` and `password`; passwords must contain at least 8 characters and no
-more than 72 UTF-8 bytes. Login returns `accessToken`, `tokenType`, and `expiresIn`. Authentication
-failures use the same response for an unknown email and an incorrect password.
-
-Task endpoints require `Authorization: Bearer <accessToken>`. Creation accepts:
-
-```json
-{
-  "title": "Prepare release",
-  "description": "Complete the release checklist",
-  "status": "TODO",
-  "dueDate": "2026-10-30"
-}
+```bash
+./auth-service/mvnw -B -ntp -f pom.xml verify
 ```
 
-`title` and `description` must not be blank, `title` is limited to 200 characters, and `status`
-must be `TODO`, `IN_PROGRESS`, or `DONE`. The list endpoint defaults to 20 tasks and accepts limits
-from 1 through 100. Clients cannot provide an owner ID; ownership always comes from the JWT.
+Docker must be running. The tests start isolated PostgreSQL containers; the development stack does
+not need to be running. The cross-service suite packages and launches both services on available
+ports, generates temporary keys, and covers authentication, validation, task lifecycle, stale
+updates, and user isolation. Reports are written to `task-service/target/karate-reports` and startup
+logs to `task-service/target/api-integration-logs`.
 
-Task responses include a numeric `version`. Updating a task uses the same editable fields as
-creation and must include the version returned by the most recent read:
+GitHub Actions runs the same `verify` command and a clean-checkout smoke job that builds the images,
+starts the complete Compose stack, and executes `scripts/smoke-test.sh`.
 
-```json
-{
-  "title": "Ship release",
-  "description": "Deploy the completed release",
-  "status": "DONE",
-  "dueDate": "2026-11-01",
-  "version": 0
-}
-```
+## Technology
 
-A successful update increments the version. An update with an older version returns
-`409 STALE_TASK_VERSION`. Deleting an owned task returns `204 No Content`.
-
-A missing task and a task owned by another user return `404 TASK_NOT_FOUND` for reads, updates,
-and deletes, preventing the API from revealing whether another user's task exists.
-
-## Key assumptions
-
-- Email addresses will be unique user identifiers for login.
-- JWTs use RS256. Auth keeps the private key and publishes its public key as JWKS; task-service
-  fetches and caches that JWKS.
-- Task ownership will be derived from the token, never accepted from a request body.
-- Dates will use PostgreSQL `DATE`; audit timestamps use time-zone-aware timestamps.
-- One PostgreSQL instance is sufficient for this take-home project. Separate service schemas retain
-  ownership boundaries without adding another container.
+- Java 21 and Spring Boot 4.1
+- Spring WebFlux, Spring Security, and Project Reactor
+- Spring Data R2DBC with PostgreSQL
+- Liquibase migrations over JDBC during startup
+- Maven multi-module build
+- JUnit 5, Karate, and Testcontainers
