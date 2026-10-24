@@ -1,0 +1,15 @@
+databaseChangeLog:
+  - changeSet:
+      id: task-003-add-task-version
+      author: task-flow
+      changes:
+        - addColumn:
+            schemaName: task_service
+            tableName: tasks
+            columns:
+              - column:
+                  name: version
+                  type: BIGINT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false

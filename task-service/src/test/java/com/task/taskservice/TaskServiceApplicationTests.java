@@ -1,6 +1,15 @@
 package com.task.taskservice;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import com.task.taskservice.task.Task;
+import com.task.taskservice.task.TaskRepository;
+import com.task.taskservice.task.TaskStatus;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -20,6 +29,9 @@ class TaskServiceApplicationTests {
 
     @LocalServerPort
     int port;
+
+    @Autowired
+    TaskRepository tasks;
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -44,6 +56,40 @@ class TaskServiceApplicationTests {
                 .expectBody()
                 .jsonPath("$.status")
                 .isEqualTo("UP");
+    }
+
+    @Test
+    void savedTaskCanBeUpdated() {
+        var ownerId = UUID.randomUUID();
+        var createdAt = Instant.parse("2026-10-23T12:00:00Z");
+        var created = Task.create(
+                UUID.randomUUID(),
+                ownerId,
+                "Initial title",
+                "Initial description",
+                TaskStatus.TODO,
+                LocalDate.parse("2026-10-30"),
+                createdAt);
+        Task saved = tasks.save(created).block();
+        var updatedAt = createdAt.plusSeconds(60);
+        var changed = new Task(
+                saved.id(),
+                saved.ownerId(),
+                "Updated title",
+                saved.description(),
+                TaskStatus.IN_PROGRESS,
+                saved.dueDate(),
+                saved.createdAt(),
+                updatedAt,
+                saved.version());
+
+        Task updated = tasks.save(changed).block();
+
+        assertEquals("Updated title", updated.title());
+        assertEquals(TaskStatus.IN_PROGRESS, updated.status());
+        assertEquals(updatedAt, updated.updatedAt());
+        assertEquals(saved.version() + 1, updated.version());
+        assertEquals(1L, tasks.count().block());
     }
 
     private static String r2dbcUrl(String schema) {
