@@ -21,6 +21,7 @@ public record User(
         return id;
     }
 
+    // Users are insert-only; UUIDs are assigned before persistence.
     @Override
     public boolean isNew() {
         return true;
