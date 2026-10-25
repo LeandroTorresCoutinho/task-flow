@@ -4,6 +4,7 @@ import com.auth.authservice.error.DuplicateEmailException;
 import com.auth.authservice.error.InvalidCredentialsException;
 import com.auth.authservice.user.User;
 import com.auth.authservice.user.UserRepository;
+import io.r2dbc.postgresql.api.PostgresqlException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Locale;
@@ -17,6 +18,8 @@ import reactor.core.scheduler.Schedulers;
 
 @Service
 public class AuthService {
+
+    private static final String EMAIL_UNIQUE_CONSTRAINT = "users_email_key";
 
     private final UserRepository users;
     private final PasswordEncoder passwordEncoder;
@@ -42,9 +45,9 @@ public class AuthService {
                 .switchIfEmpty(hash(request.password()).flatMap(passwordHash -> {
                     Instant now = clock.instant();
                     return users.save(new User(UUID.randomUUID(), email, passwordHash, now, now))
-                            .map(UserResponse::from);
-                }))
-                .onErrorMap(DataIntegrityViolationException.class, ignored -> new DuplicateEmailException());
+                            .map(UserResponse::from)
+                            .onErrorMap(AuthService::isDuplicateEmail, ignored -> new DuplicateEmailException());
+                }));
     }
 
     public Mono<TokenResponse> login(LoginRequest request) {
@@ -64,6 +67,15 @@ public class AuthService {
     private Mono<Boolean> matches(String password, String hash) {
         return Mono.fromCallable(() -> passwordEncoder.matches(password, hash))
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private static boolean isDuplicateEmail(Throwable exception) {
+        return exception instanceof DataIntegrityViolationException violation
+                && violation.getMostSpecificCause() instanceof PostgresqlException postgres
+                && postgres.getErrorDetails()
+                        .getConstraintName()
+                        .filter(EMAIL_UNIQUE_CONSTRAINT::equals)
+                        .isPresent();
     }
 
     private String normalize(String email) {

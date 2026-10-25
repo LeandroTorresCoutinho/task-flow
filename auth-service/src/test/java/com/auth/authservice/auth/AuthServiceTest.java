@@ -2,6 +2,7 @@ package com.auth.authservice.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,9 +14,13 @@ import com.auth.authservice.error.DuplicateEmailException;
 import com.auth.authservice.error.InvalidCredentialsException;
 import com.auth.authservice.user.User;
 import com.auth.authservice.user.UserRepository;
+import io.r2dbc.postgresql.api.ErrorDetails;
+import io.r2dbc.postgresql.api.PostgresqlException;
+import io.r2dbc.spi.R2dbcDataIntegrityViolationException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,13 +72,26 @@ class AuthServiceTest {
 
     @Test
     void registrationReportsADuplicateWhenTheDatabaseWinsTheRace() {
+        var violation = databaseViolation("users_email_key");
         when(users.findByEmail("user@example.com")).thenReturn(Mono.empty());
-        when(users.save(any(User.class)))
-                .thenReturn(Mono.error(new DataIntegrityViolationException("users_email_key")));
+        when(users.save(any(User.class))).thenReturn(Mono.error(violation));
 
         assertThrows(
                 DuplicateEmailException.class,
                 () -> authService.register(new RegisterRequest("user@example.com", "password123")).block());
+    }
+
+    @Test
+    void registrationPreservesOtherIntegrityViolations() {
+        var violation = databaseViolation("users_pkey");
+        when(users.findByEmail("user@example.com")).thenReturn(Mono.empty());
+        when(users.save(any(User.class))).thenReturn(Mono.error(violation));
+
+        var thrown = assertThrows(
+                DataIntegrityViolationException.class,
+                () -> authService.register(new RegisterRequest("user@example.com", "password123")).block());
+
+        assertSame(violation, thrown);
     }
 
     @Test
@@ -111,5 +129,28 @@ class AuthServiceTest {
 
     private User user(String passwordHash) {
         return new User(UUID.randomUUID(), "user@example.com", passwordHash, NOW, NOW);
+    }
+
+    private DataIntegrityViolationException databaseViolation(String constraintName) {
+        var details = mock(ErrorDetails.class);
+        when(details.getConstraintName()).thenReturn(Optional.of(constraintName));
+        return new DataIntegrityViolationException(
+                constraintName, new TestPostgresqlException(details));
+    }
+
+    private static final class TestPostgresqlException extends R2dbcDataIntegrityViolationException
+            implements PostgresqlException {
+
+        private final ErrorDetails details;
+
+        private TestPostgresqlException(ErrorDetails details) {
+            super("constraint violation", "23505");
+            this.details = details;
+        }
+
+        @Override
+        public ErrorDetails getErrorDetails() {
+            return details;
+        }
     }
 }
